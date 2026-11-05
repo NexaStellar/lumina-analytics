@@ -1,0 +1,62 @@
+{
+  "name": "@lumina/backend",
+  "version": "0.1.0",
+  "description": "Backend service for Lumina Analytics - Stellar network monitoring",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "node-pg-migrate up",
+    "db:seed": "tsx src/db/seed.ts"
+  },
+  "keywords": [
+    "stellar",
+    "analytics",
+    "monitoring",
+    "horizon",
+    "soroban",
+    "blockchain"
+  ],
+  "author": "NexaStellar <hello@nexastellar.dev>",
+  "license": "MIT",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^11.3.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "ws": "^8.16.0",
+    "pg": "^8.11.3",
+    "redis": "^4.6.12",
+    "ioredis": "^5.3.2",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^7.1.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/ws": "^8.5.10",
+    "@types/pg": "^8.10.9",
+    "@types/node": "^20.10.6",
+    "@types/compression": "^1.7.5",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.3",
+    "node-pg-migrate": "^6.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
