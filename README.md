@@ -6,6 +6,8 @@
 
 Real-time analytics and monitoring dashboard for the Stellar network. Track transactions, accounts, assets, DEX activity, and Soroban contract interactions with beautiful visualizations and powerful insights.
 
+[📚 Developer documentation](https://nexastellar.github.io/lumina-analytics/)
+
 ## 🌟 Features
 
 - **📊 Real-Time Dashboard**: Live metrics and transaction monitoring
@@ -427,7 +429,6 @@ MIT License - see [LICENSE](LICENSE) file.
 ## 🔗 Links
 
 - [Live Demo](https://demo.lumina.nexastellar.dev)
-- [Developer documentation](https://nexastellar.github.io/lumina-analytics/)
 - [API Docs](https://api.lumina.nexastellar.dev/docs)
 - [Report Issues](https://github.com/NexaStellar/lumina-analytics/issues)
 
