@@ -7,9 +7,10 @@
   <title>Lumina Analytics — Documentation</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="lumina-docs">
+  <a class="skip-link" href="#main-content">Skip to documentation</a>
   <header>
-    <p class="eyebrow">NexaStellar · Developer documentation</p>
+    <p class="eyebrow">NexaStellar / Network intelligence</p>
     <h1>Lumina Analytics</h1>
     <p>Project guide for the Stellar-network analytics prototype, covering the implemented Horizon service, intended architecture, local setup status, and concrete repository gaps.</p>
     <div class="badges"><span class="badge">Node.js · TypeScript</span><span class="badge">Horizon integration</span><span class="badge">Alpha scaffold</span></div>
@@ -21,7 +22,7 @@
       <a href="#horizon">Horizon service</a><a href="#patterns">Usage patterns</a><a href="#configuration">Configuration</a>
       <a href="#operations">Operations &amp; errors</a><a href="#roadmap">Next implementation steps</a><a href="#contributing">Contributing</a>
     </nav>
-    <main>
+    <main id="main-content">
       <section id="status">
         <h2>Current status</h2>
         <div class="callout warning"><strong>Prototype scaffold, not a running analytics product.</strong> The checked-in source currently includes a backend Horizon service, a backend package manifest, and a Docker Compose file. The referenced backend Dockerfile, frontend directory/Dockerfile, API server, database schema/migrations, and complete dashboard are absent from this checkout. Consequently the published README’s full-stack setup and feature list do not describe working code today.</div>
