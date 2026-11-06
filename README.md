@@ -427,9 +427,11 @@ MIT License - see [LICENSE](LICENSE) file.
 ## 🔗 Links
 
 - [Live Demo](https://demo.lumina.nexastellar.dev)
-- [Documentation](https://docs.nexastellar.dev/lumina)
+- [Developer documentation](https://nexastellar.github.io/lumina-analytics/)
 - [API Docs](https://api.lumina.nexastellar.dev/docs)
 - [Report Issues](https://github.com/NexaStellar/lumina-analytics/issues)
+
+The documentation site is maintained in [`docs/`](docs/). GitHub Pages must be enabled with **GitHub Actions** as the build and deployment source.
 
 ## 💬 Community
 

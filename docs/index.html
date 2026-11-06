@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Architecture, setup notes, and current implementation guide for Lumina Analytics.">
+  <title>Lumina Analytics — Documentation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <p class="eyebrow">NexaStellar · Developer documentation</p>
+    <h1>Lumina Analytics</h1>
+    <p>Project guide for the Stellar-network analytics prototype, covering the implemented Horizon service, intended architecture, local setup status, and concrete repository gaps.</p>
+    <div class="badges"><span class="badge">Node.js · TypeScript</span><span class="badge">Horizon integration</span><span class="badge">Alpha scaffold</span></div>
+  </header>
+  <div class="layout">
+    <nav aria-label="On this page">
+      <strong>On this page</strong>
+      <a href="#status">Current status</a><a href="#architecture">Architecture</a><a href="#setup">Setup &amp; limitations</a>
+      <a href="#horizon">Horizon service</a><a href="#patterns">Usage patterns</a><a href="#configuration">Configuration</a>
+      <a href="#operations">Operations &amp; errors</a><a href="#roadmap">Next implementation steps</a><a href="#contributing">Contributing</a>
+    </nav>
+    <main>
+      <section id="status">
+        <h2>Current status</h2>
+        <div class="callout warning"><strong>Prototype scaffold, not a running analytics product.</strong> The checked-in source currently includes a backend Horizon service, a backend package manifest, and a Docker Compose file. The referenced backend Dockerfile, frontend directory/Dockerfile, API server, database schema/migrations, and complete dashboard are absent from this checkout. Consequently the published README’s full-stack setup and feature list do not describe working code today.</div>
+        <p>This site distinguishes the implemented Stellar Horizon data-access methods from the intended future product. There is no current REST API or WebSocket server in the checked-in source. Do not rely on advertised dashboard URLs, API endpoints, alerts, export, database indexing, or Soroban analytics as implemented functionality.</p>
+      </section>
+      <section id="architecture">
+        <h2>Architecture and scope</h2>
+        <p>The sole application service currently present is <code>backend/src/services/horizon.ts</code>. It wraps the Stellar SDK’s Horizon <code>Server</code> and exposes network reads and streaming. The project README describes a broader frontend/backend/database design, but those pieces must be built before that architecture exists.</p>
+        <div class="cards">
+          <div class="card"><strong>Implemented now</strong>Horizon transaction/ledger streaming, lookup, account reads, asset/trade/orderbook reads, and a basic recent-network summary.</div>
+          <div class="card"><strong>Scaffold/config only</strong>Package scripts and Compose service declarations for PostgreSQL/TimescaleDB, Redis, backend, and frontend.</div>
+          <div class="card"><strong>Not implemented in this checkout</strong>HTTP API, WebSocket routes, persistent indexing, UI, alerts, data exports, migrations, and operational authentication.</div>
+        </div>
+      </section>
+      <section id="setup">
+        <h2>Setup and known limitations</h2>
+        <p>The backend manifest targets Node.js 18+ and declares a <code>dev</code> script for <code>src/index.ts</code>, but that entrypoint is not present in the current file tree. The compose configuration references <code>backend/Dockerfile</code> and <code>frontend/Dockerfile</code>, neither of which is checked in, and there is no <code>frontend/</code> directory.</p>
+        <p>For these reasons, <code>docker compose up</code> and the README’s backend start command are not currently a verified working setup. Treat the following as a starting point for the standalone service, not a full app launch:</p>
+        <pre><code>cd backend
+npm install
+npm run typecheck</code></pre>
+        <p>The package includes a typecheck script, but there are no checked-in backend tests or API entrypoint at this time. To use the service directly, construct <code>HorizonService</code> with a valid Horizon endpoint and a network label.</p>
+      </section>
+      <section id="horizon">
+        <h2>HorizonService reference</h2>
+        <p>Import <code>HorizonService</code> from <code>backend/src/services/horizon.ts</code>. Constructor:</p>
+        <pre><code>new HorizonService(
+  horizonUrl: string,
+  network: 'testnet' | 'mainnet'
+)</code></pre>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Description</th><th>Return behavior</th></tr></thead><tbody>
+          <tr><td><code>streamTransactions(cursor, onMessage, onError?)</code></td><td>Subscribe to Horizon transactions. Cursor defaults to <code>'now'</code>.</td><td>Returns a close function; use it to stop the stream.</td></tr>
+          <tr><td><code>streamLedgers(cursor, onMessage, onError?)</code></td><td>Subscribe to ledger records. Cursor defaults to <code>'now'</code>.</td><td>Returns a close function.</td></tr>
+          <tr><td><code>getTransaction(hash)</code></td><td>Fetch a transaction record by hash.</td><td>Promise of Stellar SDK transaction record.</td></tr>
+          <tr><td><code>getAccount(publicKey)</code></td><td>Load an account.</td><td>Promise of account record.</td></tr>
+          <tr><td><code>getRecentTransactions(limit = 20, cursor?)</code></td><td>Fetch descending transaction records; optional cursor supports pagination.</td><td>Horizon collection page.</td></tr>
+          <tr><td><code>getAccountTransactions(publicKey, limit = 20)</code></td><td>Fetch descending transactions for one account.</td><td>Horizon collection page.</td></tr>
+          <tr><td><code>getAsset(code, issuer)</code>, <code>getAssets(limit = 200)</code></td><td>Read an issued asset or a page of assets.</td><td>Horizon response/page.</td></tr>
+          <tr><td><code>getOrderbook(sellingAsset, buyingAsset)</code></td><td>Read the orderbook for a pair of SDK assets.</td><td>Horizon orderbook record.</td></tr>
+          <tr><td><code>getTrades(baseAsset, counterAsset, limit = 200)</code></td><td>Fetch descending trades for an asset pair.</td><td>Horizon collection page.</td></tr>
+          <tr><td><code>getNetworkStats()</code></td><td>Read the latest ledger and up to 200 recent transactions, then calculate summary values.</td><td>Object with latest ledger, recent transaction count/average fee/success rate, and configured network label.</td></tr>
+          <tr><td><code>search(query)</code></td><td>Try public-key lookup, 64-character transaction-hash lookup, and asset-code query.</td><td>Object with <code>accounts</code>, <code>transactions</code>, and <code>assets</code> arrays.</td></tr>
+        </tbody></table></div>
+        <p>The service uses the Horizon SDK, not Soroban RPC. A <code>SOROBAN_RPC_URL</code> appears in Compose but no current service consumes it.</p>
+      </section>
+      <section id="patterns">
+        <h2>Usage patterns</h2>
+        <h3>Fetch a transaction</h3>
+        <pre><code>import { HorizonService } from './services/horizon';
+
+const horizon = new HorizonService(
+  process.env.HORIZON_URL ?? 'https://horizon-testnet.stellar.org',
+  'testnet',
+);
+
+const transaction = await horizon.getTransaction(transactionHash);
+console.log(transaction.hash, transaction.successful);</code></pre>
+        <h3>Stream and close a subscription</h3>
+        <pre><code>const close = horizon.streamTransactions(
+  'now',
+  (transaction) => console.log(transaction.hash),
+  (error) => console.error('Horizon stream failed', error),
+);
+
+// When stopping the consumer:
+close();</code></pre>
+        <h3>Use the lookup helpers</h3>
+        <pre><code>const account = await horizon.getAccount(publicKey);
+const page = await horizon.getRecentTransactions(25);
+const results = await horizon.search(publicKey);</code></pre>
+        <p>These are direct service calls, not HTTP routes. The repository does not yet expose these methods to a browser client through an API server.</p>
+      </section>
+      <section id="configuration">
+        <h2>Configuration</h2>
+        <p>The service itself takes its endpoint and network as constructor parameters; it does not read environment variables. The Compose file currently supplies these intended backend variables:</p>
+        <div class="table-wrap"><table><thead><tr><th>Variable</th><th>Compose value / purpose</th></tr></thead><tbody>
+          <tr><td><code>HORIZON_URL</code></td><td>Stellar testnet Horizon URL.</td></tr>
+          <tr><td><code>NETWORK</code></td><td><code>testnet</code>; currently only used if application code passes it to the service.</td></tr>
+          <tr><td><code>SOROBAN_RPC_URL</code></td><td>Testnet RPC URL declared in Compose; no Soroban service currently uses it.</td></tr>
+          <tr><td><code>DATABASE_URL</code>, <code>REDIS_URL</code></td><td>Intended PostgreSQL and Redis connection strings; no checked-in code currently consumes them.</td></tr>
+          <tr><td><code>API_PORT</code>, <code>WS_PORT</code></td><td>Intended API/stream ports; no checked-in server binds these ports.</td></tr>
+        </tbody></table></div>
+        <p>Use your own infrastructure credentials and avoid committing environment files. The Compose file includes development database credentials and must not be used as a production secret configuration.</p>
+      </section>
+      <section id="operations">
+        <h2>Operational behavior and error handling</h2>
+        <ul><li>Horizon calls can fail due to connectivity, endpoint limits, invalid identifiers, or missing records; callers should catch and surface errors appropriately.</li><li>Pass the optional stream error callback and always call the returned close function when the consumer is finished.</li><li><code>getNetworkStats()</code> computes average fee and success rate from the returned transactions. An empty transaction page can result in non-finite summary values; validate the result before presenting it.</li><li><code>search()</code> treats lookup failures as no results and does not provide ranked or fuzzy search. Its generic asset query is by asset code.</li><li>Configure CORS, authentication, rate limiting, and input validation before exposing any future server endpoints publicly.</li></ul>
+      </section>
+      <section id="roadmap">
+        <h2>Recommended implementation sequence</h2>
+        <ol><li>Add focused tests for each HorizonService method and failure/empty-result behavior.</li><li>Create a small backend entrypoint and a documented API contract, then wire selected Horizon methods through validated routes.</li><li>Either implement the frontend and Dockerfiles referenced by Compose or remove the broken service declarations until they exist.</li><li>Add database schema and indexing only after the required data model and retention needs are clear.</li><li>Implement Soroban RPC integration separately from Horizon and document the distinct endpoints, network configuration, and failure modes.</li></ol>
+        <p>This is a suggested sequence, not a claim that those components are already implemented.</p>
+      </section>
+      <section id="contributing">
+        <h2>Contributing</h2>
+        <p>Keep this documentation synchronized with actual source, add tests for behavior being introduced, and avoid describing planned endpoints or dashboards as available. See the <a href="https://github.com/NexaStellar/lumina-analytics">source repository</a> and <a href="https://github.com/NexaStellar/lumina-analytics/issues">open issues</a>.</p>
+      </section>
+    </main>
+  </div>
+  <footer>Documentation reflects the files present in this repository checkout. <a href="../README.md">Repository README</a>.</footer>
+</body>
+</html>
