@@ -1,11 +1,117 @@
-import { Server, ServerApi } from '@stellar/stellar-sdk';
+import * as StellarSdk from '@stellar/stellar-sdk';
+import type { ServerApi } from '@stellar/stellar-sdk';
+
+export type SearchCategory = 'accounts' | 'transactions' | 'assets';
+
+export interface SearchResults {
+  accounts: ServerApi.AccountRecord[];
+  transactions: ServerApi.TransactionRecord[];
+  assets: unknown[];
+}
+
+export class HorizonSearchError extends Error {
+  public readonly code: 'HORIZON_RATE_LIMIT' | 'HORIZON_TIMEOUT' | 'HORIZON_UPSTREAM_ERROR';
+  public readonly category: SearchCategory;
+  public readonly status?: number;
+  public readonly partialResults: SearchResults;
+  public readonly causeError?: unknown;
+
+  constructor(params: {
+    message: string;
+    code: 'HORIZON_RATE_LIMIT' | 'HORIZON_TIMEOUT' | 'HORIZON_UPSTREAM_ERROR';
+    category: SearchCategory;
+    status?: number;
+    partialResults: SearchResults;
+    causeError?: unknown;
+  }) {
+    super(params.message);
+    this.name = 'HorizonSearchError';
+    this.code = params.code;
+    this.category = params.category;
+    this.status = params.status;
+    this.partialResults = params.partialResults;
+    this.causeError = params.causeError;
+  }
+}
+
+function extractHorizonStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const errObj = error as Record<string, unknown>;
+  if (typeof errObj.status === 'number') return errObj.status;
+  if (typeof errObj.statusCode === 'number') return errObj.statusCode;
+  const response = errObj.response as Record<string, unknown> | undefined;
+  if (response && typeof response.status === 'number') return response.status;
+  if (response && typeof response.statusCode === 'number') return response.statusCode;
+  return undefined;
+}
+
+export function isNotFoundError(error: unknown): boolean {
+  const status = extractHorizonStatus(error);
+  if (status === 404) return true;
+  if (error && typeof error === 'object') {
+    const name = (error as { name?: unknown }).name;
+    if (name === 'NotFoundError') return true;
+  }
+  return false;
+}
+
+function toHorizonSearchError(
+  error: unknown,
+  category: SearchCategory,
+  partialResults: SearchResults
+): HorizonSearchError {
+  const status = extractHorizonStatus(error);
+  const rawMessage = error instanceof Error ? error.message : 'Upstream Horizon error';
+  const errCode =
+    error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+
+  if (status === 429) {
+    return new HorizonSearchError({
+      message: `Horizon rate limit exceeded during ${category} search`,
+      code: 'HORIZON_RATE_LIMIT',
+      category,
+      status,
+      partialResults,
+      causeError: error,
+    });
+  }
+
+  if (
+    status === 408 ||
+    status === 504 ||
+    errCode === 'ETIMEDOUT' ||
+    errCode === 'ECONNABORTED' ||
+    /timeout|timed out/i.test(rawMessage)
+  ) {
+    return new HorizonSearchError({
+      message: `Horizon request timed out during ${category} search`,
+      code: 'HORIZON_TIMEOUT',
+      category,
+      status,
+      partialResults,
+      causeError: error,
+    });
+  }
+
+  return new HorizonSearchError({
+    message: `Horizon upstream failure during ${category} search: ${rawMessage}`,
+    code: 'HORIZON_UPSTREAM_ERROR',
+    category,
+    status,
+    partialResults,
+    causeError: error,
+  });
+}
 
 export class HorizonService {
-  private server: Server;
+  private server: any;
   private network: 'testnet' | 'mainnet';
 
-  constructor(horizonUrl: string, network: 'testnet' | 'mainnet') {
-    this.server = new Server(horizonUrl);
+  constructor(horizonUrl: string, network: 'testnet' | 'mainnet', serverInstance?: any) {
+    const ServerCtor =
+      (StellarSdk as Record<string, any>).Server ??
+      (StellarSdk as Record<string, any>).Horizon?.Server;
+    this.server = serverInstance ?? (ServerCtor ? new ServerCtor(horizonUrl) : null);
     this.network = network;
   }
 
@@ -161,10 +267,10 @@ export class HorizonService {
       // Calculate statistics
       const totalTxCount = txResponse.records.length;
       const avgFee =
-        txResponse.records.reduce((sum, tx) => sum + parseInt(tx.fee_charged), 0) /
+        txResponse.records.reduce((sum: number, tx: any) => sum + parseInt(tx.fee_charged), 0) /
         totalTxCount;
 
-      const successCount = txResponse.records.filter((tx) => tx.successful).length;
+      const successCount = txResponse.records.filter((tx: any) => tx.successful).length;
       const successRate = (successCount / totalTxCount) * 100;
 
       return {
@@ -187,10 +293,12 @@ export class HorizonService {
   }
 
   /**
-   * Search for accounts, transactions, or assets
+   * Search for accounts, transactions, or assets.
+   * Preserves legitimate 404 NotFound responses as empty results while propagating
+   * rate limits, timeouts, and 5xx upstream failures as HorizonSearchError.
    */
-  async search(query: string) {
-    const results: any = {
+  async search(query: string): Promise<SearchResults> {
+    const results: SearchResults = {
       accounts: [],
       transactions: [],
       assets: [],
@@ -202,7 +310,9 @@ export class HorizonService {
         const account = await this.getAccount(query);
         results.accounts.push(account);
       } catch (error) {
-        // Account not found
+        if (!isNotFoundError(error)) {
+          throw toHorizonSearchError(error, 'accounts', { ...results });
+        }
       }
     }
 
@@ -212,16 +322,20 @@ export class HorizonService {
         const tx = await this.getTransaction(query);
         results.transactions.push(tx);
       } catch (error) {
-        // Transaction not found
+        if (!isNotFoundError(error)) {
+          throw toHorizonSearchError(error, 'transactions', { ...results });
+        }
       }
     }
 
     // Search assets by code
     try {
       const assets = await this.server.assets().forCode(query).limit(10).call();
-      results.assets = assets.records;
+      results.assets = Array.isArray(assets?.records) ? assets.records : [];
     } catch (error) {
-      // No assets found
+      if (!isNotFoundError(error)) {
+        throw toHorizonSearchError(error, 'assets', { ...results });
+      }
     }
 
     return results;
