@@ -131,6 +131,31 @@ describe('HorizonService', () => {
     });
   });
 
+  describe('page limits', () => {
+    it.each([0, 201, 1.5, Number.NaN])(
+      'rejects invalid page limit %s before calling Horizon',
+      async (limit) => {
+        const service = createService();
+        const invalidLimitError =
+          'Horizon page limit must be an integer between 1 and 200';
+
+        await expect(service.getRecentTransactions(limit)).rejects.toThrow(
+          invalidLimitError
+        );
+        await expect(
+          service.getAccountTransactions(ACCOUNT_ID, limit)
+        ).rejects.toThrow(invalidLimitError);
+        await expect(service.getAssets(limit)).rejects.toThrow(invalidLimitError);
+        await expect(service.getTrades(null, null, limit)).rejects.toThrow(
+          invalidLimitError
+        );
+
+        expect(mocks.calls.transactions).not.toHaveBeenCalled();
+        expect(mocks.calls.assets).not.toHaveBeenCalled();
+      }
+    );
+  });
+
   describe('search()', () => {
     it('keeps account and transaction not-found lookups as empty results', async () => {
       const notFound = Object.assign(new Error('Resource Missing'), {

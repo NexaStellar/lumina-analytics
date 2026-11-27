@@ -11,6 +11,7 @@ The backend currently provides:
 
 - A Horizon client for transactions, accounts, assets, order books, trades, network statistics, search, and streams.
 - A Soroban RPC service for bounded pages of recent contract events. Results are limited to the configured RPC node's retention window and are not a complete historical archive.
+- Horizon paginated query methods reject limits outside the integer range 1–200 before making a request.
 
 The repository does not yet contain a running frontend, mounted REST API, persistent analytics database, WebSocket application server, alerting system, or data-export implementation. The architecture and endpoint descriptions in older material are not implemented interfaces.
 

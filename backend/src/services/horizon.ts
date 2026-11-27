@@ -2,6 +2,17 @@ import { Horizon } from '@stellar/stellar-sdk';
 
 export type SearchCategory = 'accounts' | 'transactions' | 'assets';
 
+const MAX_HORIZON_PAGE_LIMIT = 200;
+
+function validatePageLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_HORIZON_PAGE_LIMIT) {
+    throw new RangeError(
+      `Horizon page limit must be an integer between 1 and ${MAX_HORIZON_PAGE_LIMIT}`
+    );
+  }
+  return limit;
+}
+
 export interface SearchResults {
   accounts: Horizon.AccountResponse[];
   transactions: Horizon.ServerApi.TransactionRecord[];
@@ -174,7 +185,8 @@ export class HorizonService {
     limit: number = 20,
     cursor?: string
   ): Promise<Horizon.ServerApi.CollectionPage<Horizon.ServerApi.TransactionRecord>> {
-    let builder = this.server.transactions().order('desc').limit(limit);
+    const pageLimit = validatePageLimit(limit);
+    let builder = this.server.transactions().order('desc').limit(pageLimit);
 
     if (cursor) {
       builder = builder.cursor(cursor);
@@ -190,11 +202,12 @@ export class HorizonService {
     publicKey: string,
     limit: number = 20
   ): Promise<Horizon.ServerApi.CollectionPage<Horizon.ServerApi.TransactionRecord>> {
+    const pageLimit = validatePageLimit(limit);
     return this.server
       .transactions()
       .forAccount(publicKey)
       .order('desc')
-      .limit(limit)
+      .limit(pageLimit)
       .call();
   }
 
@@ -213,7 +226,8 @@ export class HorizonService {
    * Get all assets
    */
   async getAssets(limit: number = 200) {
-    return this.server.assets().limit(limit).call();
+    const pageLimit = validatePageLimit(limit);
+    return this.server.assets().limit(pageLimit).call();
   }
 
   /**
@@ -236,10 +250,11 @@ export class HorizonService {
     counterAsset: any,
     limit: number = 200
   ) {
+    const pageLimit = validatePageLimit(limit);
     return this.server
       .trades()
       .forAssetPair(baseAsset, counterAsset)
-      .limit(limit)
+      .limit(pageLimit)
       .order('desc')
       .call();
   }
