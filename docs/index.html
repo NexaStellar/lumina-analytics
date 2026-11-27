@@ -25,26 +25,27 @@
     <main id="main-content">
       <section id="status">
         <h2>Current status</h2>
-        <div class="callout warning"><strong>Prototype scaffold, not a running analytics product.</strong> The checked-in source currently includes a backend Horizon service, a backend package manifest, and a Docker Compose file. The referenced backend Dockerfile, frontend directory/Dockerfile, API server, database schema/migrations, and complete dashboard are absent from this checkout. Consequently the published README’s full-stack setup and feature list do not describe working code today.</div>
-        <p>This site distinguishes the implemented Stellar Horizon data-access methods from the intended future product. There is no current REST API or WebSocket server in the checked-in source. Do not rely on advertised dashboard URLs, API endpoints, alerts, export, database indexing, or Soroban analytics as implemented functionality.</p>
+        <div class="callout warning"><strong>Early-stage backend prototype, not a production analytics product.</strong> The checked-in backend includes a Horizon service, a bounded Soroban RPC event service, a read-only REST API, and a health endpoint. There is no dashboard or persistent analytics database, and the Docker Compose setup is not a verified end-to-end deployment.</div>
+        <p>The REST API exposes selected Horizon reads, not a full historical archive. Do not rely on dashboard URLs, alerting, data export, persistent indexing, or complete Soroban event history as implemented functionality.</p>
       </section>
       <section id="architecture">
         <h2>Architecture and scope</h2>
-        <p>The sole application service currently present is <code>backend/src/services/horizon.ts</code>. It wraps the Stellar SDK’s Horizon <code>Server</code> and exposes network reads and streaming. The project README describes a broader frontend/backend/database design, but those pieces must be built before that architecture exists.</p>
+        <p>The backend contains <code>HorizonService</code> for Horizon reads and streams, <code>SorobanService</code> for bounded recent contract-event queries, and an Express bootstrap that mounts the read-only Horizon API under <code>/api/v1</code>.</p>
         <div class="cards">
-          <div class="card"><strong>Implemented now</strong>Horizon transaction/ledger streaming, lookup, account reads, asset/trade/orderbook reads, and a basic recent-network summary.</div>
-          <div class="card"><strong>Scaffold/config only</strong>Package scripts and Compose service declarations for PostgreSQL/TimescaleDB, Redis, backend, and frontend.</div>
-          <div class="card"><strong>Not implemented in this checkout</strong>HTTP API, WebSocket routes, persistent indexing, UI, alerts, data exports, migrations, and operational authentication.</div>
+          <div class="card"><strong>Implemented now</strong>Horizon queries and streams, bounded Soroban event queries, read-only REST endpoints, health checks, and mocked backend tests.</div>
+          <div class="card"><strong>Configuration only</strong>Compose declarations for supporting services do not constitute a verified application deployment.</div>
+          <div class="card"><strong>Not implemented</strong>Dashboard, persistent analytics/indexing, WebSocket application server, alerts, data exports, and production operations.</div>
         </div>
       </section>
       <section id="setup">
         <h2>Setup and known limitations</h2>
-        <p>The backend manifest targets Node.js 18+ and declares a <code>dev</code> script for <code>src/index.ts</code>, but that entrypoint is not present in the current file tree. The compose configuration references <code>backend/Dockerfile</code> and <code>frontend/Dockerfile</code>, neither of which is checked in, and there is no <code>frontend/</code> directory.</p>
-        <p>For these reasons, <code>docker compose up</code> and the README’s backend start command are not currently a verified working setup. Treat the following as a starting point for the standalone service, not a full app launch:</p>
-        <pre><code>cd backend
-npm install
-npm run typecheck</code></pre>
-        <p>The package includes a typecheck script, but there are no checked-in backend tests or API entrypoint at this time. To use the service directly, construct <code>HorizonService</code> with a valid Horizon endpoint and a network label.</p>
+        <p>The backend requires Node.js 22.12 or newer. From <code>backend/</code>, install dependencies and run the checks:</p>
+        <pre><code>npm ci
+npm run lint
+npm run typecheck
+npm test -- --run
+npm run build</code></pre>
+        <p>Run <code>npm run dev</code> to start the API locally. It binds to <code>127.0.0.1:4000</code> by default. Tests use mocked Horizon and Soroban responses; they do not require live network access. The Compose setup is not a verified full application launch.</p>
       </section>
       <section id="horizon">
         <h2>HorizonService reference</h2>
@@ -66,10 +67,22 @@ npm run typecheck</code></pre>
           <tr><td><code>getNetworkStats()</code></td><td>Read the latest ledger and up to 200 recent transactions, then calculate summary values.</td><td>Object with latest ledger, recent transaction count/average fee/success rate, and configured network label.</td></tr>
           <tr><td><code>search(query)</code></td><td>Try public-key lookup, 64-character transaction-hash lookup, and asset-code query.</td><td>Object with <code>accounts</code>, <code>transactions</code>, and <code>assets</code> arrays.</td></tr>
         </tbody></table></div>
-        <p>The service uses the Horizon SDK, not Soroban RPC. A <code>SOROBAN_RPC_URL</code> appears in Compose but no current service consumes it.</p>
+        <p><code>HorizonService</code> uses Stellar Horizon. <code>SorobanService</code> is a separate read-only service that queries recent contract events through Soroban RPC.</p>
       </section>
       <section id="patterns">
-        <h2>Usage patterns</h2>
+        <h2>Service and API patterns</h2>
+        <h3>Read-only HTTP endpoints</h3>
+        <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead><tbody>
+          <tr><td><code>GET /health</code>, <code>GET /api/v1/health</code></td><td>Return backend health and network metadata.</td></tr>
+          <tr><td><code>GET /api/v1/stats</code></td><td>Return the recent Horizon network summary.</td></tr>
+          <tr><td><code>GET /api/v1/transactions/:hash</code></td><td>Look up a transaction by its 64-character hexadecimal hash.</td></tr>
+          <tr><td><code>GET /api/v1/accounts/:publicKey</code></td><td>Look up a Stellar account by public key.</td></tr>
+          <tr><td><code>GET /api/v1/assets/:code/:issuer</code></td><td>Look up an issued asset.</td></tr>
+          <tr><td><code>GET /api/v1/search?q=...</code></td><td>Search supported account, transaction, or asset identifiers.</td></tr>
+        </tbody></table></div>
+        <p>These are read-only endpoints. The API does not expose a dashboard or a complete event-history archive.</p>
+        <h3>Call the API</h3>
+        <pre><code>curl http://127.0.0.1:4000/api/v1/stats</code></pre>
         <h3>Fetch a transaction</h3>
         <pre><code>import { HorizonService } from './services/horizon';
 
@@ -93,28 +106,29 @@ close();</code></pre>
         <pre><code>const account = await horizon.getAccount(publicKey);
 const page = await horizon.getRecentTransactions(25);
 const results = await horizon.search(publicKey);</code></pre>
-        <p>These are direct service calls, not HTTP routes. The repository does not yet expose these methods to a browser client through an API server.</p>
+        <p>The service methods can also be called directly from backend code.</p>
       </section>
       <section id="configuration">
         <h2>Configuration</h2>
-        <p>The service itself takes its endpoint and network as constructor parameters; it does not read environment variables. The Compose file currently supplies these intended backend variables:</p>
-        <div class="table-wrap"><table><thead><tr><th>Variable</th><th>Compose value / purpose</th></tr></thead><tbody>
-          <tr><td><code>HORIZON_URL</code></td><td>Stellar testnet Horizon URL.</td></tr>
-          <tr><td><code>NETWORK</code></td><td><code>testnet</code>; currently only used if application code passes it to the service.</td></tr>
-          <tr><td><code>SOROBAN_RPC_URL</code></td><td>Testnet RPC URL declared in Compose; no Soroban service currently uses it.</td></tr>
+        <p><code>HorizonService</code> takes its endpoint and network as constructor parameters. The backend bootstrap reads the following environment variables:</p>
+        <div class="table-wrap"><table><thead><tr><th>Variable</th><th>Purpose</th></tr></thead><tbody>
+          <tr><td><code>API_HOST</code>, <code>API_PORT</code></td><td>Bind address and port; defaults to <code>127.0.0.1:4000</code>.</td></tr>
+          <tr><td><code>NETWORK</code></td><td>Selects <code>testnet</code> or <code>mainnet</code> metadata and the default Horizon URL.</td></tr>
+          <tr><td><code>HORIZON_URL</code></td><td>Optional Horizon endpoint override; defaults to the selected network's public endpoint.</td></tr>
+          <tr><td><code>SOROBAN_RPC_URL</code></td><td>Optional RPC endpoint used by <code>SorobanService</code>; defaults to Stellar testnet RPC.</td></tr>
           <tr><td><code>DATABASE_URL</code>, <code>REDIS_URL</code></td><td>Intended PostgreSQL and Redis connection strings; no checked-in code currently consumes them.</td></tr>
-          <tr><td><code>API_PORT</code>, <code>WS_PORT</code></td><td>Intended API/stream ports; no checked-in server binds these ports.</td></tr>
+          <tr><td><code>WS_PORT</code></td><td>Declared for a future stream server; no application WebSocket server currently binds it.</td></tr>
         </tbody></table></div>
         <p>Use your own infrastructure credentials and avoid committing environment files. The Compose file includes development database credentials and must not be used as a production secret configuration.</p>
       </section>
       <section id="operations">
         <h2>Operational behavior and error handling</h2>
-        <ul><li>Horizon calls can fail due to connectivity, endpoint limits, invalid identifiers, or missing records; callers should catch and surface errors appropriately.</li><li>Pass the optional stream error callback and always call the returned close function when the consumer is finished.</li><li><code>getNetworkStats()</code> computes average fee and success rate from the returned transactions. An empty transaction page can result in non-finite summary values; validate the result before presenting it.</li><li><code>search()</code> treats lookup failures as no results and does not provide ranked or fuzzy search. Its generic asset query is by asset code.</li><li>Configure CORS, authentication, rate limiting, and input validation before exposing any future server endpoints publicly.</li></ul>
+        <ul><li>Horizon and Soroban RPC calls can fail due to connectivity, endpoint limits, invalid identifiers, or missing records; callers should surface upstream failures appropriately.</li><li>Pass the optional Horizon stream error callback and always call the returned close function when the consumer is finished.</li><li><code>getNetworkStats()</code> computes average fee and success rate from up to 200 recent transactions; empty results produce zero values.</li><li>Horizon pagination is limited to integer page sizes from 1 through 200. Soroban event queries are also bounded and limited to the configured RPC node's retention window.</li><li>The API is a prototype. Review deployment security, rate limits, and operational monitoring before exposing it publicly.</li></ul>
       </section>
       <section id="roadmap">
-        <h2>Recommended implementation sequence</h2>
-        <ol><li>Add focused tests for each HorizonService method and failure/empty-result behavior.</li><li>Create a small backend entrypoint and a documented API contract, then wire selected Horizon methods through validated routes.</li><li>Either implement the frontend and Dockerfiles referenced by Compose or remove the broken service declarations until they exist.</li><li>Add database schema and indexing only after the required data model and retention needs are clear.</li><li>Implement Soroban RPC integration separately from Horizon and document the distinct endpoints, network configuration, and failure modes.</li></ol>
-        <p>This is a suggested sequence, not a claim that those components are already implemented.</p>
+        <h2>Next implementation steps</h2>
+        <ol><li>Expand focused tests for route validation, upstream failures, and additional API endpoints.</li><li>Document a stable API contract and decide on deployment security and rate-limit requirements.</li><li>Implement or remove the incomplete Compose service declarations and add a real deployment check.</li><li>Define data-retention requirements before adding persistent indexing or historical analytics.</li><li>Build a frontend only when its required API and product scope are defined.</li></ol>
+        <p>These are future improvements, not features currently provided by the prototype.</p>
       </section>
       <section id="contributing">
         <h2>Contributing</h2>

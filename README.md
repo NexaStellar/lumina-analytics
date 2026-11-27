@@ -12,8 +12,9 @@ The backend currently provides:
 - A Horizon client for transactions, accounts, assets, order books, trades, network statistics, search, and streams.
 - A Soroban RPC service for bounded pages of recent contract events. Results are limited to the configured RPC node's retention window and are not a complete historical archive.
 - Horizon paginated query methods reject limits outside the integer range 1–200 before making a request.
+- A read-only REST API mounted at `/api/v1` for network stats, transactions, accounts, assets, and search, plus a `/health` endpoint.
 
-The repository does not yet contain a running frontend, mounted REST API, persistent analytics database, WebSocket application server, alerting system, or data-export implementation. The architecture and endpoint descriptions in older material are not implemented interfaces.
+The repository does not yet contain a running frontend, persistent analytics database, WebSocket application server, alerting system, or data-export implementation. The architecture descriptions in older material are not implemented interfaces.
 
 This project has not received a security audit. Do not rely on it for production monitoring or financial decisions.
 
@@ -37,7 +38,12 @@ The tests use mocked Horizon and Soroban responses; they do not require live net
 
 ## Configuration
 
-`HorizonService` accepts a Horizon URL and network when constructed. `SorobanService` reads `SOROBAN_RPC_URL` and defaults to the Stellar testnet RPC endpoint.
+The backend reads `API_HOST` and `API_PORT` for its bind address (default
+`127.0.0.1:4000`), `NETWORK` (`testnet` by default), and optional `HORIZON_URL`
+override. The default Horizon endpoint follows the selected network.
+`HorizonService` also accepts a URL and network when constructed directly.
+`SorobanService` reads `SOROBAN_RPC_URL` and defaults to the Stellar testnet RPC
+endpoint.
 
 ## Contributing
 
