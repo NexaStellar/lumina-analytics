@@ -1,9 +1,13 @@
-import http, { type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import http, { type Server } from 'node:http';
+import express from 'express';
+import { createHorizonRouter, type HorizonReader } from './api/routes';
+import { HorizonService } from './services/horizon';
 
 export interface BackendConfig {
   host: string;
   port: number;
   network: 'testnet' | 'mainnet';
+  horizonUrl: string;
 }
 
 export interface HealthPayload {
@@ -22,6 +26,12 @@ export interface RunningBackendServer {
   close(): Promise<void>;
 }
 
+function defaultHorizonUrl(network: BackendConfig['network']): string {
+  return network === 'mainnet'
+    ? 'https://horizon.stellar.org'
+    : 'https://horizon-testnet.stellar.org';
+}
+
 export function resolveBackendConfig(
   env: Record<string, string | undefined> = process.env
 ): BackendConfig {
@@ -31,7 +41,11 @@ export function resolveBackendConfig(
     throw new Error(`Invalid API_PORT "${env.API_PORT}": expected an integer between 0 and 65535`);
   }
   const network = env.NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
-  return { host, port: rawPort, network };
+  const horizonUrl = (env.HORIZON_URL || defaultHorizonUrl(network)).trim();
+  if (!horizonUrl) {
+    throw new Error('HORIZON_URL must be a non-empty URL');
+  }
+  return { host, port: rawPort, network, horizonUrl };
 }
 
 export function buildHealthPayload(
@@ -51,43 +65,44 @@ export function buildHealthPayload(
  * Creates the HTTP request listener for the Lumina backend bootstrap.
  * Exposes `GET /health` and `GET /api/v1/health` without requiring PostgreSQL or Redis.
  */
-export function createApp(config: Partial<BackendConfig> = {}) {
+export function createApp(
+  config: Partial<BackendConfig> = {},
+  horizonReader?: HorizonReader
+) {
   const network = config.network ?? (process.env.NETWORK === 'mainnet' ? 'mainnet' : 'testnet');
+  const horizonUrl =
+    config.horizonUrl || process.env.HORIZON_URL || defaultHorizonUrl(network);
+  const service = horizonReader ?? new HorizonService(horizonUrl, network);
+  const app = express();
 
-  return (req: IncomingMessage, res: ServerResponse): void => {
-    const method = (req.method || 'GET').toUpperCase();
-    const rawUrl = req.url || '/';
-    const pathname = rawUrl.split('?')[0];
-
+  app.disable('x-powered-by');
+  app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  });
+  app.get(['/health', '/api/v1/health'], (req, res) => {
+    const payload = buildHealthPayload(network);
+    res.status(200).json(req.method === 'HEAD' ? undefined : payload);
+  });
+  app.all(['/health', '/api/v1/health'], (_req, res) => {
+    res.status(405).json({
+      error: {
+        code: 'METHOD_NOT_ALLOWED',
+        message: 'Use GET /health',
+      },
+    });
+  });
+  app.use('/api/v1', createHorizonRouter(service));
+  app.use((req, res) => {
+    res.status(404).json({
+      error: {
+        code: 'NOT_FOUND',
+        message: `Route ${req.path} not found`,
+      },
+    });
+  });
 
-    if (pathname === '/health' || pathname === '/api/v1/health') {
-      if (method !== 'GET' && method !== 'HEAD') {
-        res.statusCode = 405;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Use GET /health' } }));
-        return;
-      }
-
-      const payload = buildHealthPayload(network);
-      const body = JSON.stringify(payload);
-      res.statusCode = 200;
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.end(method === 'HEAD' ? undefined : body);
-      return;
-    }
-
-    res.statusCode = 404;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(
-      JSON.stringify({
-        error: {
-          code: 'NOT_FOUND',
-          message: `Route ${pathname} not found`,
-        },
-      })
-    );
-  };
+  return app;
 }
 
 /**
@@ -95,7 +110,10 @@ export function createApp(config: Partial<BackendConfig> = {}) {
  */
 export async function startServer(
   overrides: Partial<BackendConfig> = {},
-  options: { registerSignalHandlers?: boolean } = {}
+  options: {
+    registerSignalHandlers?: boolean;
+    horizonReader?: HorizonReader;
+  } = {}
 ): Promise<RunningBackendServer> {
   const baseConfig = resolveBackendConfig();
   const config: BackendConfig = {
@@ -103,7 +121,7 @@ export async function startServer(
     ...overrides,
   };
 
-  const app = createApp(config);
+  const app = createApp(config, options.horizonReader);
   const server = http.createServer(app);
 
   await new Promise<void>((resolve, reject) => {

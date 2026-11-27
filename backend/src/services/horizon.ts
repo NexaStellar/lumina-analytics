@@ -1,11 +1,128 @@
-import { Server, ServerApi } from '@stellar/stellar-sdk';
+import { Horizon } from '@stellar/stellar-sdk';
+
+export type SearchCategory = 'accounts' | 'transactions' | 'assets';
+
+const MAX_HORIZON_PAGE_LIMIT = 200;
+
+function validatePageLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_HORIZON_PAGE_LIMIT) {
+    throw new RangeError(
+      `Horizon page limit must be an integer between 1 and ${MAX_HORIZON_PAGE_LIMIT}`
+    );
+  }
+  return limit;
+}
+
+export interface SearchResults {
+  accounts: Horizon.AccountResponse[];
+  transactions: Horizon.ServerApi.TransactionRecord[];
+  assets: unknown[];
+}
+
+export class HorizonSearchError extends Error {
+  readonly code: 'HORIZON_RATE_LIMIT' | 'HORIZON_TIMEOUT' | 'HORIZON_UPSTREAM_ERROR';
+  readonly category: SearchCategory;
+  readonly status?: number;
+  readonly partialResults: SearchResults;
+  readonly causeError?: unknown;
+
+  constructor(params: {
+    message: string;
+    code: 'HORIZON_RATE_LIMIT' | 'HORIZON_TIMEOUT' | 'HORIZON_UPSTREAM_ERROR';
+    category: SearchCategory;
+    status?: number;
+    partialResults: SearchResults;
+    causeError?: unknown;
+  }) {
+    super(params.message);
+    this.name = 'HorizonSearchError';
+    this.code = params.code;
+    this.category = params.category;
+    this.status = params.status;
+    this.partialResults = params.partialResults;
+    this.causeError = params.causeError;
+  }
+}
+
+function getErrorRecord(error: unknown): Record<string, unknown> | undefined {
+  return error !== null && typeof error === 'object'
+    ? (error as Record<string, unknown>)
+    : undefined;
+}
+
+function getHorizonStatus(error: unknown): number | undefined {
+  const record = getErrorRecord(error);
+  if (!record) return undefined;
+  if (typeof record.status === 'number') return record.status;
+  if (typeof record.statusCode === 'number') return record.statusCode;
+
+  const response = getErrorRecord(record.response);
+  if (typeof response?.status === 'number') return response.status;
+  if (typeof response?.statusCode === 'number') return response.statusCode;
+  return undefined;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    getHorizonStatus(error) === 404 ||
+    getErrorRecord(error)?.name === 'NotFoundError'
+  );
+}
+
+function toHorizonSearchError(
+  error: unknown,
+  category: SearchCategory,
+  partialResults: SearchResults
+): HorizonSearchError {
+  const status = getHorizonStatus(error);
+  const record = getErrorRecord(error);
+  const code = record?.code;
+  const message = error instanceof Error ? error.message : 'Upstream Horizon error';
+
+  if (status === 429) {
+    return new HorizonSearchError({
+      message: `Horizon rate limit exceeded during ${category} search`,
+      code: 'HORIZON_RATE_LIMIT',
+      category,
+      status,
+      partialResults,
+      causeError: error,
+    });
+  }
+
+  if (
+    status === 408 ||
+    status === 504 ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNABORTED' ||
+    /timeout|timed out/i.test(message)
+  ) {
+    return new HorizonSearchError({
+      message: `Horizon request timed out during ${category} search`,
+      code: 'HORIZON_TIMEOUT',
+      category,
+      status,
+      partialResults,
+      causeError: error,
+    });
+  }
+
+  return new HorizonSearchError({
+    message: `Horizon upstream failure during ${category} search: ${message}`,
+    code: 'HORIZON_UPSTREAM_ERROR',
+    category,
+    status,
+    partialResults,
+    causeError: error,
+  });
+}
 
 export class HorizonService {
-  private server: Server;
+  private server: Horizon.Server;
   private network: 'testnet' | 'mainnet';
 
   constructor(horizonUrl: string, network: 'testnet' | 'mainnet') {
-    this.server = new Server(horizonUrl);
+    this.server = new Horizon.Server(horizonUrl);
     this.network = network;
   }
 
@@ -14,8 +131,8 @@ export class HorizonService {
    */
   streamTransactions(
     cursor: string = 'now',
-    onMessage: (tx: ServerApi.TransactionRecord) => void,
-    onError?: (error: Error) => void
+    onMessage: (tx: Horizon.ServerApi.TransactionRecord) => void,
+    onError?: (event: MessageEvent) => void
   ): () => void {
     const closeStream = this.server
       .transactions()
@@ -33,8 +150,8 @@ export class HorizonService {
    */
   streamLedgers(
     cursor: string = 'now',
-    onMessage: (ledger: ServerApi.LedgerRecord) => void,
-    onError?: (error: Error) => void
+    onMessage: (ledger: Horizon.ServerApi.LedgerRecord) => void,
+    onError?: (event: MessageEvent) => void
   ): () => void {
     const closeStream = this.server
       .ledgers()
@@ -50,14 +167,14 @@ export class HorizonService {
   /**
    * Get transaction by hash
    */
-  async getTransaction(hash: string): Promise<ServerApi.TransactionRecord> {
+  async getTransaction(hash: string): Promise<Horizon.ServerApi.TransactionRecord> {
     return this.server.transactions().transaction(hash).call();
   }
 
   /**
    * Get account details
    */
-  async getAccount(publicKey: string): Promise<ServerApi.AccountRecord> {
+  async getAccount(publicKey: string): Promise<Horizon.AccountResponse> {
     return this.server.loadAccount(publicKey);
   }
 
@@ -67,8 +184,9 @@ export class HorizonService {
   async getRecentTransactions(
     limit: number = 20,
     cursor?: string
-  ): Promise<ServerApi.CollectionPage<ServerApi.TransactionRecord>> {
-    let builder = this.server.transactions().order('desc').limit(limit);
+  ): Promise<Horizon.ServerApi.CollectionPage<Horizon.ServerApi.TransactionRecord>> {
+    const pageLimit = validatePageLimit(limit);
+    let builder = this.server.transactions().order('desc').limit(pageLimit);
 
     if (cursor) {
       builder = builder.cursor(cursor);
@@ -83,12 +201,13 @@ export class HorizonService {
   async getAccountTransactions(
     publicKey: string,
     limit: number = 20
-  ): Promise<ServerApi.CollectionPage<ServerApi.TransactionRecord>> {
+  ): Promise<Horizon.ServerApi.CollectionPage<Horizon.ServerApi.TransactionRecord>> {
+    const pageLimit = validatePageLimit(limit);
     return this.server
       .transactions()
       .forAccount(publicKey)
       .order('desc')
-      .limit(limit)
+      .limit(pageLimit)
       .call();
   }
 
@@ -107,7 +226,8 @@ export class HorizonService {
    * Get all assets
    */
   async getAssets(limit: number = 200) {
-    return this.server.assets().limit(limit).call();
+    const pageLimit = validatePageLimit(limit);
+    return this.server.assets().limit(pageLimit).call();
   }
 
   /**
@@ -116,7 +236,7 @@ export class HorizonService {
   async getOrderbook(
     sellingAsset: any,
     buyingAsset: any
-  ): Promise<ServerApi.OrderbookRecord> {
+  ): Promise<Horizon.ServerApi.OrderbookRecord> {
     return this.server
       .orderbook(sellingAsset, buyingAsset)
       .call();
@@ -130,10 +250,11 @@ export class HorizonService {
     counterAsset: any,
     limit: number = 200
   ) {
+    const pageLimit = validatePageLimit(limit);
     return this.server
       .trades()
       .forAssetPair(baseAsset, counterAsset)
-      .limit(limit)
+      .limit(pageLimit)
       .order('desc')
       .call();
   }
@@ -149,7 +270,7 @@ export class HorizonService {
         .order('desc')
         .limit(1)
         .call();
-      const latestLedger = ledgersResponse.records[0];
+      const latestLedger = ledgersResponse.records[0] ?? null;
 
       // Get recent transactions
       const txResponse = await this.server
@@ -159,21 +280,30 @@ export class HorizonService {
         .call();
 
       // Calculate statistics
-      const totalTxCount = txResponse.records.length;
+      const transactions = txResponse.records ?? [];
+      const totalTxCount = transactions.length;
       const avgFee =
-        txResponse.records.reduce((sum, tx) => sum + parseInt(tx.fee_charged), 0) /
-        totalTxCount;
+        totalTxCount === 0
+          ? 0
+          : transactions.reduce(
+              (sum, tx) => sum + Number.parseInt(String(tx.fee_charged), 10),
+              0
+            ) / totalTxCount;
 
-      const successCount = txResponse.records.filter((tx) => tx.successful).length;
-      const successRate = (successCount / totalTxCount) * 100;
+      const successCount = transactions.filter((tx) => tx.successful).length;
+      const successRate = totalTxCount === 0 ? 0 : (successCount / totalTxCount) * 100;
 
       return {
-        latestLedger: {
-          sequence: latestLedger.sequence,
-          closedAt: latestLedger.closed_at,
-          transactionCount: latestLedger.transaction_count,
-          operationCount: latestLedger.operation_count,
-        },
+        latestLedger: latestLedger
+          ? {
+              sequence: latestLedger.sequence,
+              closedAt: latestLedger.closed_at,
+              transactionCount:
+                latestLedger.successful_transaction_count +
+                latestLedger.failed_transaction_count,
+              operationCount: latestLedger.operation_count,
+            }
+          : null,
         recentTransactions: {
           count: totalTxCount,
           avgFee: avgFee.toFixed(0),
@@ -189,8 +319,8 @@ export class HorizonService {
   /**
    * Search for accounts, transactions, or assets
    */
-  async search(query: string) {
-    const results: any = {
+  async search(query: string): Promise<SearchResults> {
+    const results: SearchResults = {
       accounts: [],
       transactions: [],
       assets: [],
@@ -202,7 +332,13 @@ export class HorizonService {
         const account = await this.getAccount(query);
         results.accounts.push(account);
       } catch (error) {
-        // Account not found
+        if (!isNotFoundError(error)) {
+          throw toHorizonSearchError(error, 'accounts', {
+            accounts: [...results.accounts],
+            transactions: [...results.transactions],
+            assets: [...results.assets],
+          });
+        }
       }
     }
 
@@ -212,7 +348,13 @@ export class HorizonService {
         const tx = await this.getTransaction(query);
         results.transactions.push(tx);
       } catch (error) {
-        // Transaction not found
+        if (!isNotFoundError(error)) {
+          throw toHorizonSearchError(error, 'transactions', {
+            accounts: [...results.accounts],
+            transactions: [...results.transactions],
+            assets: [...results.assets],
+          });
+        }
       }
     }
 
@@ -221,7 +363,13 @@ export class HorizonService {
       const assets = await this.server.assets().forCode(query).limit(10).call();
       results.assets = assets.records;
     } catch (error) {
-      // No assets found
+      if (!isNotFoundError(error)) {
+        throw toHorizonSearchError(error, 'assets', {
+          accounts: [...results.accounts],
+          transactions: [...results.transactions],
+          assets: [...results.assets],
+        });
+      }
     }
 
     return results;
